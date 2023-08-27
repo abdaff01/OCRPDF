@@ -9,15 +9,18 @@ import numpy as np
 import os
 import pytesseract
 from pdf2image import convert_from_path
-import cv2
-import numpy as np
 import fitz  # PyMuPDF
+from langdetect import detect
+
 
 os.environ["PATH"] += os.pathsep + 'C:/Users/abdaf/Documents/Python/OCRPDF/bin'
 
 # Set the Tesseract executable path
 pytesseract.pytesseract.tesseract_cmd = r'C:/Users/abdaf/PycharmProjects/pythonOCR/Tesseract-OCR/tesseract.exe'
 
+# Set the TESSDATA_PREFIX environment variable to the directory containing the language data files
+tessdata_dir = r"C:/Users/abdaf/PycharmProjects/pythonOCR/Tesseract-OCR/tessdata"
+os.environ["TESSDATA_PREFIX"] = tessdata_dir
 
 # Language codes for OCR
 language_codes = {
@@ -40,74 +43,42 @@ def preprocess_image(image):
     return processed_image
 
 
-# Function to convert PDF to text with language option
-def convert_pdf_to_text(pdf_file, languages=['eng']):
-    text = ""
-
-    # Use PyMuPDF to extract text
-    doc = fitz.open(pdf_file)
-    for page_num in range(doc.page_count):
-        page = doc[page_num]
-        page_text = page.get_text()
-        text += f"Page {page_num + 1}:\n{page_text}\n"
-
-    # Perform OCR with each specified language using Tesseract
-    for lang in languages:
-        if lang != 'eng':
-            continue  # Skip English as it's already handled by PyMuPDF
-        custom_config = f'--oem 3 --psm 6 -l {lang}+'
-        image_texts = pytesseract.image_to_string(processed_image, config=custom_config)
-        text += f"Language: {language_codes[lang]}\n{image_texts}\n"
-
-    return text
-
-# Function to check if the image has two columns
-def is_two_column_layout(image):
-    gray_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
-    edges = cv2.Canny(gray_image, threshold1=50, threshold2=150)
-
-    # Apply Hough Line Transform to detect vertical lines
-    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100, minLineLength=100, maxLineGap=10)
-
-    if lines is not None:
-        vertical_lines = [line[0] for line in lines if abs(line[0][0] - line[0][2]) < 10]
-        if len(vertical_lines) > 1:
-            return True
-
-    return False
-
-
-# Function to separate columns
-def separate_columns(image):
-    width, height = image.size
-    left_column = image.crop((0, 0, width // 2, height))
-    right_column = image.crop((width // 2, 0, width, height))
-    return left_column, right_column
-
-
-# Function for default preprocessing
-def default_preprocessing(image):
+def perform_ocr(image, language_code):
+    # Apply Gaussian blur and adaptive thresholding for improved preprocessing
     processed_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
-    processed_image = cv2.threshold(processed_image, 128, 255, cv2.THRESH_BINARY)[1]
-    return processed_image
+    processed_image = cv2.GaussianBlur(processed_image, (3, 3), 0)
+    processed_image = cv2.adaptiveThreshold(processed_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11,
+                                            2)
 
-
-# Function to convert PDF to text
-def convert_pdf_to_text(pdf_file):
-    images = convert_from_path(pdf_file, 200)
-    text = ""
-
-    for image in images:
-        if is_two_column_layout(image):
-            column1, column2 = separate_columns(image)
-            column1_text = pytesseract.image_to_string(default_preprocessing(column1))
-            column2_text = pytesseract.image_to_string(default_preprocessing(column2))
-            text += column1_text + " " + column2_text + '\n'
-        else:
-            page_text = pytesseract.image_to_string(default_preprocessing(image))
-            text += page_text + '\n'
-
+    text = pytesseract.image_to_string(processed_image, lang=language_code, config='--psm 6 --oem 3')
     return text
+
+
+# ...
+
+def convert_pdf_to_text(pdf_file):
+    text = ""
+    pdf_document = fitz.open(pdf_file)
+    for page_num in range(pdf_document.page_count):
+        page = pdf_document.load_page(page_num)
+        image_list = page.get_images(full=True)
+        for img_index, img in enumerate(image_list):
+            xref = img[0]
+            base_image = pdf_document.extract_image(xref)
+            image = np.frombuffer(base_image["image"], np.uint8)
+            image = cv2.imdecode(image, cv2.IMREAD_COLOR)
+
+            # Convert the image to grayscale
+            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+            # Perform OCR only for the specified language (Czech in this case)
+            page_text = perform_ocr(image, language_code='ces')
+            text += page_text + "\n"  # Only add the OCR result text
+    pdf_document.close()
+    return text
+
+# ...
+
 
 
 # Function to create a Word document
@@ -115,7 +86,7 @@ def create_word_document(pdf_path, dest_dir, text_content):
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
     doc_path = os.path.join(dest_dir, f"{base_name}.docx")
     doc = Document()
-    doc.add_heading("Converted PDF Content", level=1)
+#    doc.add_heading("Converted PDF Content", level=1)
     doc.add_paragraph(text_content)
     doc.save(doc_path)
     subprocess.Popen(['start', '', doc_path], shell=True)
