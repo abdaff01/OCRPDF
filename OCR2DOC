@@ -8,10 +8,7 @@ import cv2
 import numpy as np
 import os
 import pytesseract
-from pdf2image import convert_from_path
 import fitz  # PyMuPDF
-from langdetect import detect
-
 
 os.environ["PATH"] += os.pathsep + 'C:/Users/abdaf/Documents/Python/OCRPDF/bin'
 
@@ -42,21 +39,14 @@ def preprocess_image(image):
     processed_image = cv2.threshold(processed_image, 128, 255, cv2.THRESH_BINARY)[1]
     return processed_image
 
-
 def perform_ocr(image, language_code):
-    # Apply Gaussian blur and adaptive thresholding for improved preprocessing
     processed_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
     processed_image = cv2.GaussianBlur(processed_image, (3, 3), 0)
-    processed_image = cv2.adaptiveThreshold(processed_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11,
-                                            2)
-
+    processed_image = cv2.adaptiveThreshold(processed_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
     text = pytesseract.image_to_string(processed_image, lang=language_code, config='--psm 6 --oem 3')
     return text
 
-
-# ...
-
-def convert_pdf_to_text(pdf_file):
+def convert_pdf_to_text(pdf_file, selected_language):
     text = ""
     pdf_document = fitz.open(pdf_file)
     for page_num in range(pdf_document.page_count):
@@ -67,71 +57,51 @@ def convert_pdf_to_text(pdf_file):
             base_image = pdf_document.extract_image(xref)
             image = np.frombuffer(base_image["image"], np.uint8)
             image = cv2.imdecode(image, cv2.IMREAD_COLOR)
-
-            # Convert the image to grayscale
-            gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-            # Perform OCR only for the specified language (Czech in this case)
-            page_text = perform_ocr(image, language_code='ces')
-            text += page_text + "\n"  # Only add the OCR result text
+            page_text = perform_ocr(image, language_code=selected_language)
+            text += page_text + "\n"
     pdf_document.close()
     return text
 
-# ...
-
-
-
-# Function to create a Word document
 def create_word_document(pdf_path, dest_dir, text_content):
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
     doc_path = os.path.join(dest_dir, f"{base_name}.docx")
     doc = Document()
-#    doc.add_heading("Converted PDF Content", level=1)
     doc.add_paragraph(text_content)
     doc.save(doc_path)
     subprocess.Popen(['start', '', doc_path], shell=True)
 
-
-# Watchdog event handler
 class PDFHandler(FileSystemEventHandler):
+    def __init__(self, selected_language):
+        self.selected_language = selected_language
+
     def on_created(self, event):
         if event.is_directory:
             return
         file_extension = os.path.splitext(event.src_path)[1].lower()
         if file_extension == '.pdf':
-            text = convert_pdf_to_text(event.src_path)
+            text = convert_pdf_to_text(event.src_path, self.selected_language)
             create_word_document(event.src_path, destination_path.get(), text)
 
-
-# Create GUI window
 root = tk.Tk()
 root.title("PDF to Word Converter")
-
-# Set custom background color for the window
 root.configure(bg='#f5f5f5')
 
-# Title label with custom styling
 title_label = tk.Label(root, text="Keyence International", font=("Helvetica", 24), bg='#f5f5f5', fg='red')
 title_label.pack(pady=20)
 
-
-# Function to browse for PDF files
 def browse_pdf():
     pdf_file = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf")])
     source_path.set(pdf_file)
 
-
-# Function to choose destination directory
 def choose_destination():
     dest_dir = filedialog.askdirectory()
     destination_path.set(dest_dir)
 
-
-# Function to start conversion
 def start_conversion():
     pdf_path = source_path.get()
     dest_dir = destination_path.get()
-    event_handler = PDFHandler()
+    selected_language = language_choice.get()
+    event_handler = PDFHandler(selected_language)
     observer = Observer()
     observer.schedule(event_handler, os.path.dirname(pdf_path), recursive=False)
     observer.start()
@@ -140,13 +110,11 @@ def start_conversion():
         if os.path.exists(pdf_path):
             observer.stop()
             observer.join()
-            text = convert_pdf_to_text(pdf_path)
+            text = convert_pdf_to_text(pdf_path, selected_language)
             create_word_document(pdf_path, dest_dir, text)
 
     root.after(1000, check_file_and_convert)
 
-
-# GUI components
 source_path = tk.StringVar()
 destination_path = tk.StringVar()
 
@@ -164,9 +132,16 @@ destination_entry.pack(padx=10, pady=5)
 choose_dest_button = tk.Button(root, text="Choose Destination", command=choose_destination, bg='black', fg='white')
 choose_dest_button.pack(pady=5)
 
+language_choice = tk.StringVar()
+language_choice.set('eng')  # Set 'English' as the default language
+language_label = tk.Label(root, text="Select Language:", bg='#f5f5f5', fg='black', font=("Helvetica", 14))
+language_label.pack()
+language_menu = tk.OptionMenu(root, language_choice, *language_codes.keys())
+language_menu.pack(pady=5)
+
 convert_button = tk.Button(root, text="Convert PDF to Word", command=start_conversion, bg='black', fg='white',
                            font=("Helvetica", 14))
 convert_button.pack(pady=20)
 
-root.geometry("500x400")  # Set the window size
+root.geometry("500x500")  # Set the window size
 root.mainloop()
