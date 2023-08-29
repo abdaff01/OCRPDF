@@ -128,7 +128,7 @@ browse_button.pack(pady=5)
 destination_label = tk.Label(root, text="Destination Directory:", bg='#f5f5f5', fg='black', font=("Helvetica", 14))
 destination_label.pack()
 destination_entry = tk.Entry(root, textvariable=destination_path)
-destination_entry.pack(padx=10, pady=5)
+destination_entry.pack(padx=50, pady=5)
 choose_dest_button = tk.Button(root, text="Choose Destination", command=choose_destination, bg='black', fg='white')
 choose_dest_button.pack(pady=5)
 
