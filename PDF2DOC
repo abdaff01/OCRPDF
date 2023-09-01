@@ -15,7 +15,6 @@ import threading
 tesseract_path = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
-
 # Language codes for OCR
 language_codes = {
     'eng': 'English',
@@ -64,11 +63,20 @@ def convert_pdf_to_text(pdf_file, selected_language):
     pdf_document.close()
     return text
 
-def create_word_document(pdf_path, dest_dir, text_content):
-    # Check if text_content is not empty
+# Function to extract text from an image
+def extract_text_from_image(image_path, selected_language):
+    try:
+        image = cv2.imread(image_path)
+        text = perform_ocr(image, language_code=selected_language)
+        return text
+    except Exception as e:
+        print("Error loading image:", e)
+        return ""
+
+# Function to create a Word document from text content
+def create_word_document(output_path, text_content):
     if text_content:
-        base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-        doc_path = os.path.join(dest_dir, f"{base_name}.docx")
+        doc_path = output_path
         doc = Document()
         doc.add_paragraph(text_content)
         doc.save(doc_path)
@@ -76,81 +84,91 @@ def create_word_document(pdf_path, dest_dir, text_content):
     else:
         print("No text content to create Word document.")
 
-
-
 # Class for handling file system events
-class PDFHandler(FileSystemEventHandler):
-    def __init__(self, selected_language):
+class FileHandler(FileSystemEventHandler):
+    def __init__(self, selected_language, output_dir):
         self.selected_language = selected_language
+        self.output_dir = output_dir
 
     def on_created(self, event):
         if event.is_directory:
             return
         file_extension = os.path.splitext(event.src_path)[1].lower()
         if file_extension == '.pdf':
-            t = threading.Thread(target=self.convert_and_save, args=(event.src_path,))
+            t = threading.Thread(target=self.convert_pdf_and_save, args=(event.src_path,))
+            t.start()
+        elif file_extension in ['.jpg', '.jpeg', '.png', '.bmp']:
+            t = threading.Thread(target=self.extract_image_and_save, args=(event.src_path,))
             t.start()
 
-    def convert_and_save(self, pdf_path):
+    def convert_pdf_and_save(self, pdf_path):
         text = convert_pdf_to_text(pdf_path, self.selected_language)
         base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-        doc_path = os.path.join(destination_path.get(), f"{base_name}.docx")
-        create_word_document(pdf_path, doc_path, text)
-        print("Conversion complete:", doc_path)
+        doc_path = os.path.join(self.output_dir, f"{base_name}.docx")
+        create_word_document(doc_path, text)
+        print("PDF Conversion complete:", doc_path)
 
-# Function to browse and select a PDF file
-def browse_pdf():
-    pdf_file = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf")])
-    source_path.set(pdf_file)
+    def extract_image_and_save(self, image_path):
+        text = extract_text_from_image(image_path, self.selected_language)
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        doc_path = os.path.join(self.output_dir, f"{base_name}.docx")
+        create_word_document(doc_path, text)
+        print("Image OCR complete:", doc_path)
 
-# Function to choose the destination directory
-def choose_destination():
-    dest_dir = filedialog.askdirectory()
-    destination_path.set(dest_dir)
+# Function to browse and select a file
+def browse_file():
+    file_path = filedialog.askopenfilename(filetypes=[("PDF files and Images", "*.pdf *.jpg *.jpeg *.png *.bmp")])
+    source_path.set(file_path)
+
+# Function to choose the output directory
+def choose_output_directory():
+    output_dir = filedialog.askdirectory()
+    output_path.set(output_dir)
 
 # Function to start the conversion process
 def start_conversion():
-    pdf_path = source_path.get()
-    dest_dir = destination_path.get()
+    selected_file_path = source_path.get()
+    output_dir = output_path.get()
     selected_language = language_choice.get()
-    event_handler = PDFHandler(selected_language)
+    event_handler = FileHandler(selected_language, output_dir)
     observer = Observer()
-    observer.schedule(event_handler, os.path.dirname(pdf_path), recursive=False)
+    observer.schedule(event_handler, os.path.dirname(selected_file_path), recursive=False)
     observer.start()
 
     def check_file_and_convert():
-        if os.path.exists(pdf_path):
+        if os.path.exists(selected_file_path):
             observer.stop()
             observer.join()
-            text = convert_pdf_to_text(pdf_path, selected_language)
-            create_word_document(pdf_path, dest_dir, text)
+            if selected_file_path.endswith('.pdf'):
+                text = convert_pdf_to_text(selected_file_path, selected_language)
+            else:
+                text = extract_text_from_image(selected_file_path, selected_language)
+            create_word_document(os.path.join(output_dir, "output.docx"), text)
 
     root.after(1000, check_file_and_convert)
 
-
 # Create the main application window
 root = tk.Tk()
-root.title("PDF to Word Converter")
+root.title("File to Word Converter")
 root.configure(bg='#f5f5f5')
 
-
-
 source_path = tk.StringVar()
-destination_path = tk.StringVar()
+output_path = tk.StringVar()
 
-source_label = tk.Label(root, text="Source PDF:", bg='#f5f5f5', fg='black', font=("Helvetica", 14))
+source_label = tk.Label(root, text="Select File:", bg='#f5f5f5', fg='black', font=("Helvetica", 14))
 source_label.pack()
 source_entry = tk.Entry(root, textvariable=source_path)
 source_entry.pack(padx=10, pady=5)
-browse_button = tk.Button(root, text="Browse", command=browse_pdf, bg='black', fg='white')
+browse_button = tk.Button(root, text="Browse", command=browse_file, bg='black', fg='white')
 browse_button.pack(pady=5)
 
-destination_label = tk.Label(root, text="Destination Directory:", bg='#f5f5f5', fg='black', font=("Helvetica", 14))
-destination_label.pack()
-destination_entry = tk.Entry(root, textvariable=destination_path)
-destination_entry.pack(padx=50, pady=5)
-choose_dest_button = tk.Button(root, text="Choose Destination", command=choose_destination, bg='black', fg='white')
-choose_dest_button.pack(pady=5)
+output_label = tk.Label(root, text="Output Directory:", bg='#f5f5f5', fg='black', font=("Helvetica", 14))
+output_label.pack()
+output_entry = tk.Entry(root, textvariable=output_path)
+output_entry.pack(padx=50, pady=5)
+choose_output_button = tk.Button(root, text="Choose Output Directory", command=choose_output_directory,
+                                 bg='black', fg='white')
+choose_output_button.pack(pady=5)
 
 language_choice = tk.StringVar()
 language_choice.set('eng')  # Set 'English' as the default language
@@ -159,7 +177,7 @@ language_label.pack()
 language_menu = tk.OptionMenu(root, language_choice, *language_codes.keys())
 language_menu.pack(pady=5)
 
-convert_button = tk.Button(root, text="Convert PDF to Word", command=start_conversion, bg='black', fg='white',
+convert_button = tk.Button(root, text="Convert File to Word", command=start_conversion, bg='black', fg='white',
                            font=("Helvetica", 14))
 convert_button.pack(pady=20)
 
